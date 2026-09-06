@@ -11,7 +11,7 @@
   Hermes Terminal opens the real `hermes --tui` of the gateway this Desktop window is connected to.
   Local Hermes, or a remote dashboard you already signed into. Same PTY the web dashboard Chat tab uses.
 
-  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.0.2</sub>
+  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.0.3</sub>
 
   <br /><br />
 
@@ -107,7 +107,7 @@ When you open TUI, the plugin mints a WebSocket ticket for the current connectio
 Your Hermes Desktop  →  gateway ticket (/api/ws rewritten to /api/pty)  →  hermes --tui on that gateway
 ```
 
-A remote dashboard must already work for Desktop chat. Loopback bind (`127.0.0.2`) rejects other machines. Auth has to be configured for a public bind. See the web dashboard remote-backend notes.
+A remote dashboard must already work for Desktop chat. Loopback bind (`127.0.0.3`) rejects other machines. Auth has to be configured for a public bind. See the web dashboard remote-backend notes.
 
 ## Compatibility
 
