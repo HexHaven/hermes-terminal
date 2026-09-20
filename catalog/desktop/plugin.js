@@ -3,7 +3,7 @@
  *
  * Same door as the web dashboard Chat tab: WebSocket /api/pty on the
  * gateway this Desktop window is already signed into. Local and remote
- * share that path. No core patch, no plugin_api.py.
+ * share that path. Optional cwd needs a supporting gateway; no plugin_api.py.
  *
  * AUTHORING RULES (loaded UNCOMPILED):
  *  - SINGLE FILE. Evaluated from a blob URL, so sibling imports die.
@@ -26,6 +26,7 @@ const PLUGIN_NAME = 'TUI'
 const ROUTE = '/hermes-terminal'
 const VERSION = '0.0.3'
 const CHANNEL = 'hermes-terminal'
+const CWD_PROTOCOL = 'hermes-pty-cwd-v1'
 const XTERM_ESM = 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm'
 const XTERM_ESM_ALT = 'https://esm.sh/@xterm/xterm@5.5.0'
 const XTERM_UMD = 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js'
@@ -419,6 +420,9 @@ function connectionKey(connectionId, profile) {
 }
 
 async function mintPtyUrl(opts) {
+  if (opts.cwd !== undefined && (typeof opts.cwd !== 'string' || !opts.cwd || opts.cwd.includes('\0'))) {
+    throw new Error('cwd must be a non-empty string without NUL characters')
+  }
   const desktop = typeof window === 'undefined' ? null : window.hermesDesktop
   if (!desktop || typeof desktop.getGatewayWsUrl !== 'function') {
     throw new Error('This Desktop build cannot mint gateway WebSocket URLs. Update Hermes Desktop.')
@@ -444,6 +448,7 @@ async function mintPtyUrl(opts) {
   if (profile) params.profile = profile
   if (opts.resume) params.resume = opts.resume
   if (opts.fresh) params.fresh = '1'
+  if (opts.cwd !== undefined) params.cwd = opts.cwd
   return toPtyUrl(wsUrl, params)
 }
 
@@ -591,6 +596,11 @@ function headerButton(label, onClick, extra) {
   return jsx('button', Object.assign(props, extra || {}, { children: label }))
 }
 
+function workspaceCwd() {
+  const supplied = host.state.cwd?.get()
+  return supplied === '' || supplied == null ? undefined : supplied
+}
+
 function PluginPageContent() {
   const gateway = useValue(host.state.gateway)
   const profile = useValue(host.state.profile) || 'default'
@@ -601,6 +611,13 @@ function PluginPageContent() {
   const wsRef = useRef(null)
   const genRef = useRef(0)
   const resumeRef = useRef('')
+  const launchRef = useRef(null)
+  const launchKey = connectionKey(connectionId, profile)
+  // Snapshot before asynchronous boot; workspace changes must not retarget
+  // a running terminal or its reconnects.
+  if (!launchRef.current || launchRef.current.key !== launchKey) {
+    launchRef.current = { key: launchKey, cwd: workspaceCwd() }
+  }
   // Opening the page starts a new TUI, same as the New button. Resume is
   // explicit: a click on a session row flips this off for that dial.
   const freshRef = useRef(true)
@@ -781,6 +798,7 @@ function PluginPageContent() {
       setStatus('connecting')
       setError('')
       const key = connectionKey(connectionId, profile)
+      const cwd = launchRef.current.cwd
       let url
       try {
         const fresh = freshRef.current
@@ -792,6 +810,7 @@ function PluginPageContent() {
           mintPtyUrl({
             connectionId,
             profile,
+            cwd,
             resume: fresh ? undefined : resumeRef.current || undefined,
             attach: attachToken(key, fresh),
             fresh
@@ -812,7 +831,7 @@ function PluginPageContent() {
         return
       }
       try {
-        ws = new WebSocket(url)
+        ws = cwd === undefined ? new WebSocket(url) : new WebSocket(url, CWD_PROTOCOL)
       } catch (err) {
         trace('WebSocket ctor failed', err)
         if (disposed || gen !== genRef.current) return
@@ -843,6 +862,12 @@ function PluginPageContent() {
         clearConnectTimer()
         trace('ws open', { gen, el: elBox(el), cols: term && term.cols, rows: term && term.rows })
         if (disposed || gen !== genRef.current) return
+        if (cwd !== undefined && ws.protocol !== CWD_PROTOCOL) {
+          teardownSocket()
+          setStatus('error')
+          setError('This gateway does not support launch cwd. Update Hermes core, then reconnect.')
+          return
+        }
         setStatus('open')
         setError('')
         sendResize()
@@ -883,10 +908,15 @@ function PluginPageContent() {
         clearConnectTimer()
         trace('ws close', { gen, code: ev.code, reason: ev.reason, clean: ev.wasClean })
         if (disposed || gen !== genRef.current) return
+        if (cwd !== undefined && !pending.protocol && ev.code === 1006) {
+          setStatus('error')
+          setError('Could not negotiate launch cwd support. Check the gateway connection and Hermes core version, then reconnect.')
+          return
+        }
         const msg = closeMessage(ev.code, ev.reason)
         setStatus('error')
         setError(msg)
-        if (ev.code !== 4401 && ev.code !== 4403 && ev.code !== 4404 && ev.code !== 4408 && ev.code !== 1011) {
+        if (ev.code !== 4400 && ev.code !== 4401 && ev.code !== 4403 && ev.code !== 4404 && ev.code !== 4408 && ev.code !== 1011) {
           scheduleReconnect()
         }
       }
@@ -995,6 +1025,7 @@ function PluginPageContent() {
     trace('user: ' + (fresh ? 'new session' : 'resume ' + resume))
     attachToken(connectionKey(connectionId, profile), true)
     freshRef.current = !!fresh
+    if (fresh) launchRef.current = { key: launchKey, cwd: workspaceCwd() }
     setResumeId(resume || '')
     setTermEpoch(n => n + 1)
   }

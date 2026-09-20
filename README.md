@@ -52,7 +52,7 @@ If the window is on a remote gateway, that TUI is the remote one.
 
 ## Stock Hermes. One file.
 
-Hermes Terminal is a single desktop plugin with its own **TUI** item in Hermes. It works with stock Hermes Desktop. There is no fork, upstream patch, separate backend, build step, or package manager.
+Hermes Terminal is a single desktop plugin with its own **TUI** item in Hermes. The default launch works with stock Hermes Desktop without a separate backend, build step, or package manager. Custom working directories require the optional backend contract described below.
 
 ## Make it yours
 
@@ -117,6 +117,40 @@ The connected dashboard has to be able to spawn the TUI. That is the same extra 
 
 First load fetches xterm.js from jsdelivr, with esm.sh as backup. The Desktop SDK does not export a terminal emulator, and a disk plugin cannot import one. Airgapped machines will see that error until we vendor xterm.
 
+## Working directory
+
+Desktop resolves the workspace directory and exposes it through the public
+`host.state.cwd` SDK atom. The plugin captures that value when opening a TUI or
+choosing **New**, and passes it as the generic optional `cwd` input to
+`mintPtyUrl({ ..., cwd })`, encoded in `/api/pty?cwd=...`. It does not inspect
+Desktop project files or stores. An empty SDK workspace value or an older SDK
+without this atom omits the input and preserves the existing launch behavior.
+Reconnect keeps the original launch directory; switching workspaces does not
+retarget a running terminal. Choose **New** to use the new workspace directory.
+
+This requires the companion Hermes core change in the HexHaven fork: the gateway
+validates the directory on **its own host**, applies it at PTY creation and through
+the existing TUI working-directory environment bridge, and separates PTY reattach
+identities by directory. Missing paths and files are errors, not fallback requests.
+For remote gateways, the supplied directory must exist there; local paths are not
+translated or mounted by this plugin.
+
+With an explicit directory the plugin requests WebSocket subprotocol
+`hermes-pty-cwd-v1`. It does not accept an unacknowledged connection as a successful
+launch. Older gateways need the companion patch; they may start their old default
+PTY before the client disconnects. Without `cwd`, no subprotocol is requested and
+older gateways remain compatible. This changes no standalone Hermes CLI flags.
+
+Development checks for this feature:
+
+```sh
+node --experimental-vm-modules --test test_cwd.mjs
+python scripts/build_catalog.py --check
+python -m unittest test_catalog_policy.py
+node --check plugin.js
+node --check catalog/desktop/plugin.js
+```
+
 ## Limits
 
 - This is the TUI, not the old CLI. `/api/pty` always spawns `hermes --tui`. There is no stock remote CLI PTY.
@@ -132,7 +166,7 @@ MIT
 
 <div align="center">
   <strong>Hermes Terminal</strong><br />
-  <sub>Stock Hermes. One file. No core patch.</sub>
+  <sub>One plugin file. Custom cwd requires a supporting gateway.</sub>
 </div>
 
 <br />
